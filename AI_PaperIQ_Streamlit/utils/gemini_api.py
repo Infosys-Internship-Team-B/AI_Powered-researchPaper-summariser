@@ -114,3 +114,87 @@ Content to summarize:
         return f"[ERROR] API Request failed{status}. Please try again later."
     except Exception as e:
         return f'[ERROR] {str(e)}'
+def generate_chat_response(prompt, model_name='flash'):
+    """
+    Generate a conversational response using Gemini API
+    
+    Args:
+        prompt: User's question with context
+        model_name: 'flash' for faster responses, 'pro' for detailed
+    
+    Returns:
+        str: AI-generated response
+    """
+    model = choose_best_model(model_name)
+    
+    # Enhanced prompt for clearer responses
+    enhanced_prompt = f"""You are a helpful AI assistant specialized in explaining technical concepts clearly and concisely.
+
+Guidelines for your response:
+- Be direct and to the point
+- Use clear, simple language
+- Break down complex topics into digestible parts
+- Use bullet points or numbered lists when appropriate
+- Include examples when helpful
+- Keep responses well-structured and easy to read
+
+User's question:
+{prompt}
+
+Provide a clear, well-organized response:"""
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={API_KEY}"
+    
+    headers = {
+        'Content-Type': 'application/json'
+    }
+    
+    payload = {
+        "contents": [{
+            "parts": [{
+                "text": enhanced_prompt
+            }]
+        }],
+        "generationConfig": {
+            "temperature": 0.7,
+            "maxOutputTokens": 2048,
+            "topP": 0.95,
+        }
+    }
+    
+    try:
+        max_retries = 4
+        for attempt in range(max_retries + 1):
+            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            status = response.status_code
+            
+            if status in (429, 503):
+                if attempt == max_retries:
+                    raise Exception("Rate limit exceeded. Please try again later.")
+                retry_after = response.headers.get('Retry-After')
+                if retry_after:
+                    try:
+                        sleep_s = int(retry_after)
+                    except ValueError:
+                        sleep_s = 1 + random.uniform(0, 0.25)
+                else:
+                    sleep_s = min(2 ** attempt, 16) + random.uniform(0, 0.25)
+                time.sleep(sleep_s)
+                continue
+            
+            response.raise_for_status()
+            result = response.json()
+            
+            if 'candidates' in result and len(result['candidates']) > 0:
+                candidate = result['candidates'][0]
+                if 'content' in candidate and 'parts' in candidate['content']:
+                    parts = candidate['content']['parts']
+                    if len(parts) > 0 and 'text' in parts[0]:
+                        return parts[0]['text'].strip()
+            
+            raise Exception("Unexpected API response format")
+            
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Chat generation failed: {str(e)}")
+    except Exception as e:
+        raise Exception(f"Chat generation failed: {str(e)}")
